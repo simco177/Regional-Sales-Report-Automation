@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Regional sales report grouped by sector, sub-industry, company, and geographic area.">
+  <title>Regional Sales Report</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --blue: #1f4e78;
+      --blue-dark: #17365d;
+      --blue-medium: #b4c7e7;
+      --blue-light: #dce6f1;
+      --border: #8db3dd;
+      --text: #152b3d;
+      --muted: #607181;
+      --surface: #f7f9fb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: #eef3f7;
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 32px auto;
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid #d3dee8;
+      border-radius: 12px;
+      box-shadow: 0 18px 50px rgba(20, 48, 78, 0.12);
+    }
+
+    .report-title {
+      padding: 22px 26px;
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .report-title h1 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 30px;
+    }
+
+    .report-title p {
+      margin: 7px 0 0;
+      color: #dceaf6;
+      font-size: 14px;
+    }
+
+    .report-meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-bottom: 1px solid #ccd8e4;
+    }
+
+    .meta-item {
+      padding: 14px 18px;
+      border-right: 1px solid #d8e1ea;
+    }
+
+    .meta-item:last-child { border-right: 0; }
+
+    .meta-label {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .meta-value {
+      display: block;
+      margin-top: 4px;
+      font-size: 16px;
+      font-weight: 650;
+    }
+
+    .report-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid #d6e0e9;
+    }
+
+    .report-controls input,
+    .report-controls select {
+      height: 40px;
+      padding: 0 12px;
+      border: 1px solid #aebdca;
+      border-radius: 6px;
+      background: #fff;
+      color: #203547;
+      font: inherit;
+    }
+
+    .report-controls input {
+      flex: 1;
+      min-width: 220px;
+    }
+
+    .download-link {
+      height: 40px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 16px;
+      border-radius: 6px;
+      background: var(--blue);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .download-link:hover,
+    .download-link:focus-visible { background: var(--blue-dark); }
+
+    .report-groups { padding: 18px; }
+
+    details > summary {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    details > summary::-webkit-details-marker { display: none; }
+
+    details > summary::before {
+      width: 16px;
+      content: "+";
+      font-size: 18px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    details[open] > summary::before { content: "−"; }
+
+    .group-label {
+      color: #607d9a;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .group-name { min-width: 0; }
+
+    .group-total {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .sector-group {
+      margin-bottom: 16px;
+      border: 1px solid #809fca;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .sector-summary {
+      padding: 12px 14px;
+      background: var(--blue-medium);
+      color: var(--blue-dark);
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .sector-content { padding: 12px; }
+
+    .industry-group {
+      margin-bottom: 12px;
+      border: 1px solid #c2d3e5;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .industry-group:last-child { margin-bottom: 0; }
+
+    .industry-summary {
+      padding: 10px 12px;
+      background: #d9e2f3;
+      color: #244061;
+      font-weight: 750;
+    }
+
+    .industry-content { padding: 10px; }
+
+    .company-group {
+      margin-bottom: 10px;
+      border: 1px solid #bdd0e2;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .company-group:last-child { margin-bottom: 0; }
+
+    .company-summary {
+      grid-template-columns: 16px 1fr auto;
+      padding: 10px 12px;
+      background: #eef3f8;
+      color: #1d3448;
+      font-weight: 700;
+    }
+
+    .area-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .area-table th {
+      padding: 9px 14px;
+      background: var(--blue);
+      color: #fff;
+      text-align: left;
+    }
+
+    .area-table th:last-child { text-align: right; }
+
+    .area-table td {
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .area-table tr:nth-child(even) { background: var(--blue-light); }
+    .area-table tr:nth-child(odd) { background: #f8fbff; }
+    .area-table tr:last-child td { border-bottom: 0; }
+
+    .sales-value {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .no-results {
+      padding: 36px 20px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .no-results[hidden] { display: none; }
+
+    .report-footer {
+      padding: 13px 20px;
+      background: var(--surface);
+      border-top: 1px solid #d6e0e9;
+      color: #5e6e7d;
+      font-size: 12px;
+    }
+
+    [hidden] { display: none !important; }
+
+    @media (max-width: 760px) {
+      .page {
+        width: 100%;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+      }
+
+      .report-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .meta-item:nth-child(2) { border-right: 0; }
+      .report-controls { align-items: stretch; flex-direction: column; }
+      .report-controls input { min-width: 0; }
+      .download-link { justify-content: center; }
+      .report-groups { padding: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="report-title">
+      <h1>Regional Sales Report</h1>
+      <p>Automated SQL reporting output</p>
+    </header>
+
+    <section class="report-meta" aria-label="Report information">
+      <div class="meta-item">
+        <span class="meta-label">Start Date</span>
+        <span class="meta-value">{{START_DATE}}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">End Date</span>
+        <span class="meta-value">{{END_DATE}}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Report Rows</span>
+        <span class="meta-value">{{ROW_COUNT}}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Generated At</span>
+        <span class="meta-value">{{GENERATED_AT}}</span>
+      </div>
+    </section>
+
+    <section class="report-controls" aria-label="Report controls">
+      <input id="report-search" type="search" placeholder="Search company, industry, sector, or region" aria-label="Search report">
+      <select id="sector-filter" aria-label="Filter by sector">
+        <option value="">All sectors</option>
+        {{SECTOR_OPTIONS}}
+      </select>
+      <a class="download-link" href="{{EXCEL_FILENAME}}" download>Download Excel</a>
+    </section>
+
+    <section id="report-groups" class="report-groups">
+      {{REPORT_GROUPS}}
+      <div id="filter-no-results" class="no-results" hidden>No report groups match the selected filters.</div>
+    </section>
+
+    <footer class="report-footer">
+      Sales values retain the unit supplied by the source data.
+    </footer>
+  </main>
+
+  <script>
+    const searchInput = document.getElementById("report-search");
+    const sectorFilter = document.getElementById("sector-filter");
+    const noResults = document.getElementById("filter-no-results");
+
+    function applyFilters() {
+      const query = searchInput.value.trim().toLowerCase();
+      const selectedSector = sectorFilter.value;
+      let visibleSectorCount = 0;
+
+      document.querySelectorAll(".sector-group").forEach((sector) => {
+        const sectorMatches = !selectedSector || sector.dataset.sector === selectedSector;
+        let visibleIndustryCount = 0;
+
+        sector.querySelectorAll(".industry-group").forEach((industry) => {
+          let visibleCompanyCount = 0;
+
+          industry.querySelectorAll(".company-group").forEach((company) => {
+            const companyMatches = !query || company.dataset.search.includes(query);
+            company.hidden = !companyMatches;
+
+            if (companyMatches) {
+              visibleCompanyCount += 1;
+              if (query) company.open = true;
+            }
+          });
+
+          industry.hidden = visibleCompanyCount === 0;
+          if (!industry.hidden) {
+            visibleIndustryCount += 1;
+            if (query) industry.open = true;
+          }
+        });
+
+        sector.hidden = !sectorMatches || visibleIndustryCount === 0;
+        if (!sector.hidden) {
+          visibleSectorCount += 1;
+          if (query) sector.open = true;
+        }
+      });
+
+      noResults.hidden = visibleSectorCount !== 0;
+    }
+
+    searchInput.addEventListener("input", applyFilters);
+    sectorFilter.addEventListener("change", applyFilters);
+  </script>
+</body>
+</html>
