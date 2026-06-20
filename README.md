@@ -45,10 +45,10 @@ The report calculates total sales for a selected reporting period and presents t
 Regional sales and company Excel files
             |
             v
-Full refresh of DuckDB staging tables
+Full refresh of a local SQLite database
             |
             v
-SQL join, date filter, grouping, and aggregation
+SQL aggregation and report export
             |
             v
 Published regional sales report
@@ -64,7 +64,7 @@ Each run:
 6. Calculates total sales by company, GICS classification, and geographic area.
 7. Publishes the grouped regional sales report.
 
-The source Excel files remain the reporting inputs. The generated DuckDB file is a local processing artifact and is not committed to the repository.
+The source Excel files remain the reporting inputs. The generated SQLite database is a local processing artifact and is not committed to the repository.
 
 ## Run Locally
 
@@ -127,12 +127,7 @@ Regional-Sales-Report-Automation/
 │   └── Regional Sales.xlsx
 ├── scripts/
 │   ├── generate_report.py
-│   ├── source_data.py
 │   └── web_report.py
-├── sql/
-│   ├── create_staging_tables.sql
-│   ├── load_staging_tables.sql
-│   └── regional_sales_report.sql
 ├── report_layout/
 │   └── regional_sales_report.html
 ├── regional_sales_reports/

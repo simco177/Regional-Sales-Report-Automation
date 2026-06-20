@@ -1,26 +1,23 @@
 import argparse
+import sqlite3
 import shutil
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-import duckdb
-from openpyxl import Workbook
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 if __package__:
-    from scripts.source_data import create_source_tables
     from scripts.web_report import create_html_report
 else:
-    from source_data import create_source_tables
     from web_report import create_html_report
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATABASE_PATH = PROJECT_ROOT / "database" / "regional_sales.duckdb"
-CREATE_TABLES_SQL = PROJECT_ROOT / "sql" / "create_staging_tables.sql"
-LOAD_TABLES_SQL = PROJECT_ROOT / "sql" / "load_staging_tables.sql"
-REPORT_SQL = PROJECT_ROOT / "sql" / "regional_sales_report.sql"
+DATABASE_PATH = PROJECT_ROOT / "database" / "regional_sales.db"
 SITE_OUTPUT_DIRECTORY = PROJECT_ROOT / "outputs" / "site"
 REPORT_OUTPUT_DIRECTORY = PROJECT_ROOT / "regional_sales_reports"
 DEFAULT_EXCEL_OUTPUT = REPORT_OUTPUT_DIRECTORY / "regional_sales_report.xlsx"
@@ -31,6 +28,23 @@ DEFAULT_COMPANY_DATA = (
 DEFAULT_SALES_DATA = (
     PROJECT_ROOT / "data" / "Regional Sales.xlsx"
 )
+
+COMPANY_COLUMNS = [
+    "company_id",
+    "company_name",
+    "GICS_sector",
+    "GICS_sub_industry",
+    "headquarters_loc",
+]
+
+REQUIRED_COMPANY_COLUMNS = COMPANY_COLUMNS[:-1]
+
+SALES_COLUMNS = [
+    "company_id",
+    "gareac",
+    "salecs",
+    "reporting_date",
+]
 
 
 def parse_arguments():
@@ -89,19 +103,175 @@ def validate_dates(start_date_text, end_date_text):
     return start_date, end_date
 
 
+def _read_source_file(path):
+    path = Path(path)
+
+    if not path.exists():
+        raise ValueError(f"source data file does not exist: {path}")
+
+    if path.suffix.lower() == ".csv":
+        return pd.read_csv(path)
+    if path.suffix.lower() == ".xlsx":
+        return pd.read_excel(path)
+
+    raise ValueError(
+        f"source data file must use .csv or .xlsx format: {path}"
+    )
+
+
+def _clean_text(value):
+    if pd.isna(value):
+        return None
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return str(value).strip()
+
+
+def _require_columns(dataframe, columns, source_name):
+    missing_columns = [
+        column for column in columns if column not in dataframe.columns
+    ]
+
+    if missing_columns:
+        missing = ", ".join(missing_columns)
+        raise ValueError(f"{source_name} is missing required columns: {missing}")
+
+
+def _require_values(dataframe, columns, source_name):
+    for column in columns:
+        missing_values = dataframe[column].isna() | (
+            dataframe[column].astype(str).str.strip() == ""
+        )
+
+        if missing_values.any():
+            raise ValueError(
+                f"{source_name} is missing values for required column {column}"
+            )
+
+
+def _normalize_company_data(path):
+    company_data = _read_source_file(path)
+
+    if company_data.empty:
+        raise ValueError("company data contains no records")
+
+    _require_columns(
+        company_data,
+        REQUIRED_COMPANY_COLUMNS,
+        "company data",
+    )
+
+    if "headquarters_loc" not in company_data.columns:
+        company_data["headquarters_loc"] = None
+
+    company_data = company_data[COMPANY_COLUMNS].copy()
+
+    for column in COMPANY_COLUMNS:
+        company_data[column] = company_data[column].map(_clean_text)
+
+    _require_values(
+        company_data,
+        REQUIRED_COMPANY_COLUMNS,
+        "company data",
+    )
+
+    return company_data
+
+
+def _normalize_sales_data(path):
+    sales_data = _read_source_file(path)
+
+    if sales_data.empty:
+        raise ValueError("sales data contains no records")
+
+    _require_columns(sales_data, SALES_COLUMNS, "sales data")
+
+    sales_data = sales_data[SALES_COLUMNS].copy()
+
+    for column in ("company_id", "gareac"):
+        sales_data[column] = sales_data[column].map(_clean_text)
+
+    sales_data["salecs"] = pd.to_numeric(
+        sales_data["salecs"],
+        errors="coerce",
+    )
+
+    reporting_dates = pd.to_datetime(
+        sales_data["reporting_date"],
+        errors="coerce",
+    )
+
+    if reporting_dates.isna().any():
+        raise ValueError(
+            "sales data contains invalid values for reporting_date"
+        )
+
+    sales_data["reporting_date"] = reporting_dates.dt.date.astype(str)
+
+    _require_values(
+        sales_data,
+        ("company_id", "gareac", "reporting_date"),
+        "sales data",
+    )
+
+    return sales_data
+
+
+def _create_database_tables(connection):
+    connection.executescript(
+        """
+        DROP TABLE IF EXISTS regional_sales;
+        DROP TABLE IF EXISTS company_info;
+
+        CREATE TABLE company_info (
+            company_id TEXT PRIMARY KEY NOT NULL,
+            company_name TEXT NOT NULL,
+            GICS_sector TEXT NOT NULL,
+            GICS_sub_industry TEXT NOT NULL,
+            headquarters_loc TEXT
+        );
+
+        CREATE TABLE regional_sales (
+            company_id TEXT NOT NULL,
+            gareac TEXT NOT NULL,
+            salecs REAL,
+            reporting_date TEXT NOT NULL
+        );
+        """
+    )
+
+
+def _load_database_tables(connection, company_data_path, sales_data_path):
+    company_data = _normalize_company_data(company_data_path)
+    sales_data = _normalize_sales_data(sales_data_path)
+
+    with connection:
+        _create_database_tables(connection)
+        company_data.to_sql(
+            "company_info",
+            connection,
+            if_exists="append",
+            index=False,
+        )
+        sales_data.to_sql(
+            "regional_sales",
+            connection,
+            if_exists="append",
+            index=False,
+        )
+
+
 def prepare_database(company_data_path, sales_data_path):
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    connection = duckdb.connect(str(DATABASE_PATH))
+    connection = sqlite3.connect(DATABASE_PATH)
 
     try:
-        connection.execute(CREATE_TABLES_SQL.read_text())
-        create_source_tables(
+        _load_database_tables(
             connection,
             company_data_path,
             sales_data_path,
         )
-        connection.execute(LOAD_TABLES_SQL.read_text())
     except Exception:
         connection.close()
         raise
@@ -110,17 +280,41 @@ def prepare_database(company_data_path, sales_data_path):
 
 
 def retrieve_report_data(connection, start_date, end_date):
-    report_query = REPORT_SQL.read_text()
-
-    result = connection.execute(
-        report_query,
-        [start_date.isoformat(), end_date.isoformat()],
+    df = pd.read_sql_query(
+        """
+        SELECT
+            company_info.company_name,
+            company_info.GICS_sector,
+            company_info.GICS_sub_industry,
+            regional_sales.gareac AS geographic_area_code,
+            SUM(regional_sales.salecs) AS total_sales
+        FROM regional_sales
+        INNER JOIN company_info
+            ON company_info.company_id = regional_sales.company_id
+        WHERE regional_sales.reporting_date BETWEEN ? AND ?
+        GROUP BY
+            company_info.company_name,
+            company_info.GICS_sector,
+            company_info.GICS_sub_industry,
+            regional_sales.gareac
+        ORDER BY
+            company_info.GICS_sector,
+            company_info.GICS_sub_industry,
+            company_info.company_name,
+            regional_sales.gareac
+        """,
+        connection,
+        params=(start_date.isoformat(), end_date.isoformat()),
     )
 
-    column_names = [
-        column[0] for column in result.description
+    column_names = list(df.columns)
+    rows = [
+        tuple(row)
+        for row in df.where(pd.notna(df), None).itertuples(
+            index=False,
+            name=None,
+        )
     ]
-    rows = result.fetchall()
 
     return column_names, rows
 
@@ -135,15 +329,22 @@ def create_excel_report(
 ):
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    workbook = Workbook()
-    report_sheet = workbook.active
-    report_sheet.title = "Regional Sales Report"
-
     if generated_at is None:
         generated_at = datetime.now(timezone.utc).replace(
             microsecond=0,
             tzinfo=None,
         )
+
+    df = pd.DataFrame(rows, columns=column_names)
+    df.to_excel(
+        output_path,
+        sheet_name="Regional Sales Report",
+        index=False,
+        startrow=6,
+    )
+
+    workbook = load_workbook(output_path)
+    report_sheet = workbook["Regional Sales Report"]
 
     report_sheet.merge_cells("A1:E1")
     report_sheet["A1"] = "Regional Sales Report"
@@ -174,13 +375,6 @@ def create_excel_report(
     report_sheet["D4"].number_format = "yyyy-mm-dd hh:mm:ss"
 
     header_row = 7
-    report_sheet.append([])
-    report_sheet.append([])
-    report_sheet.append(column_names)
-
-    for row in rows:
-        report_sheet.append(list(row))
-
     header_fill = PatternFill(
         fill_type="solid",
         fgColor="1F4E78",
@@ -210,8 +404,9 @@ def create_excel_report(
         cell.number_format = "#,##0.000"
 
     if rows:
+        last_column = get_column_letter(len(column_names))
         table_reference = (
-            f"A{header_row}:E{report_sheet.max_row}"
+            f"A{header_row}:{last_column}{report_sheet.max_row}"
         )
 
         report_table = Table(
@@ -288,7 +483,7 @@ def main():
         print(f"Web report created: {arguments.html_output}")
         print(f"Rows produced: {len(rows)}")
 
-    except (ValueError, OSError, duckdb.Error) as error:
+    except (ValueError, OSError, sqlite3.Error) as error:
         raise SystemExit(str(error)) from error
 
 

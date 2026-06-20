@@ -196,6 +196,7 @@ class GenerateReportTests(unittest.TestCase):
 
             report_sheet = workbook["Regional Sales Report"]
             self.assertEqual(report_sheet["A1"].value, "Regional Sales Report")
+            self.assertEqual(report_sheet.max_row, 8)
             self.assertEqual(len(report_sheet.tables), 1)
             self.assertIsNone(report_sheet.auto_filter.ref)
 
@@ -312,6 +313,24 @@ class GenerateReportTests(unittest.TestCase):
         )
         self.assertIn('git commit -m "Update regional sales report"', workflow)
         self.assertIn("git push", workflow)
+
+    def test_report_uses_sqlite_and_pandas_flow(self):
+        project_root = Path(__file__).resolve().parents[1]
+        script = (
+            project_root / "scripts" / "generate_report.py"
+        ).read_text(encoding="utf-8")
+        requirements = (
+            project_root / "requirements.txt"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("import sqlite3", script)
+        self.assertIn("import pandas as pd", script)
+        self.assertIn("sqlite3.connect", script)
+        self.assertIn("pd.read_sql_query", script)
+        self.assertIn("df.to_excel", script)
+        self.assertNotIn("import duckdb", script)
+        self.assertIn("pandas", requirements)
+        self.assertNotIn("duckdb", requirements.lower())
 
 
 if __name__ == "__main__":

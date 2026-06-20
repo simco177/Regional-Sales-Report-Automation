@@ -1,6 +1,5 @@
 .venv/
-database/*.duckdb
-database/*.wal
+database/
 outputs/
 __pycache__/
 *.pyc
