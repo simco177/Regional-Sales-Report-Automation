@@ -19,6 +19,9 @@ class GenerateReportTests(unittest.TestCase):
     def test_browser_report_source_uses_report_layout_directory(self):
         self.assertEqual(TEMPLATE_PATH.parent.name, "report_layout")
         self.assertTrue(TEMPLATE_PATH.is_file())
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
+        self.assertIn("Automated report output", template)
+        self.assertNotIn("Automated SQL reporting output", template)
 
     def test_generates_report_from_synthetic_excel_sources(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
