@@ -17,7 +17,7 @@ else:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATABASE_PATH = PROJECT_ROOT / "database" / "regional_sales.db"
+DATABASE_PATH = PROJECT_ROOT / "database" / "regional_sales.sqlite"
 SITE_OUTPUT_DIRECTORY = PROJECT_ROOT / "outputs" / "site"
 REPORT_OUTPUT_DIRECTORY = PROJECT_ROOT / "regional_sales_reports"
 DEFAULT_EXCEL_OUTPUT = REPORT_OUTPUT_DIRECTORY / "regional_sales_report.xlsx"
@@ -217,8 +217,8 @@ def _normalize_sales_data(path):
     return sales_data
 
 
-def _create_database_tables(connection):
-    connection.executescript(
+def _create_database_tables(conn):
+    conn.executescript(
         """
         DROP TABLE IF EXISTS regional_sales;
         DROP TABLE IF EXISTS company_info;
@@ -241,45 +241,45 @@ def _create_database_tables(connection):
     )
 
 
-def _load_database_tables(connection, company_data_path, sales_data_path):
+def _load_database_tables(conn, company_data_path, sales_data_path):
     company_data = _normalize_company_data(company_data_path)
     sales_data = _normalize_sales_data(sales_data_path)
 
-    with connection:
-        _create_database_tables(connection)
-        company_data.to_sql(
-            "company_info",
-            connection,
-            if_exists="append",
-            index=False,
-        )
-        sales_data.to_sql(
-            "regional_sales",
-            connection,
-            if_exists="append",
-            index=False,
-        )
+    _create_database_tables(conn)
+    company_data.to_sql(
+        "company_info",
+        conn,
+        if_exists="append",
+        index=False,
+    )
+    sales_data.to_sql(
+        "regional_sales",
+        conn,
+        if_exists="append",
+        index=False,
+    )
+    conn.commit()
 
 
 def prepare_database(company_data_path, sales_data_path):
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    connection = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH)
 
     try:
         _load_database_tables(
-            connection,
+            conn,
             company_data_path,
             sales_data_path,
         )
     except Exception:
-        connection.close()
+        conn.close()
         raise
 
-    return connection
+    return conn
 
 
-def retrieve_report_data(connection, start_date, end_date):
+def retrieve_report_data(conn, start_date, end_date):
     df = pd.read_sql_query(
         """
         SELECT
@@ -303,7 +303,7 @@ def retrieve_report_data(connection, start_date, end_date):
             company_info.company_name,
             regional_sales.gareac
         """,
-        connection,
+        conn,
         params=(start_date.isoformat(), end_date.isoformat()),
     )
 
@@ -434,19 +434,19 @@ def main():
             arguments.end_date,
         )
 
-        connection = prepare_database(
+        conn = prepare_database(
             arguments.company_data,
             arguments.sales_data,
         )
 
         try:
             column_names, rows = retrieve_report_data(
-                connection,
+                conn,
                 start_date,
                 end_date,
             )
         finally:
-            connection.close()
+            conn.close()
 
         generated_at = datetime.now(timezone.utc).replace(
             microsecond=0,
